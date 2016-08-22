@@ -1,20 +1,28 @@
 from __future__ import print_function
 from collections import deque
 from array import array
+from operator import xor
 from sys import exit
 
 __author__ = 'inmcm'
 
+def ary_to_str(byte_array, nibbles):  # Can print rows
+    frmt_str = '0' + str(nibbles) + 'X'
+    return ''.join([format(x,frmt_str) for x in byte_array])
+
+def kst_to_str(list_of_byte_arrays, nibbles):  # Can print whole key states
+    frmt_str = '0' + str(nibbles) + 'X'
+    return '0X' + ''.join([''.join([format(x,frmt_str) for x in w]) for w in list_of_byte_arrays])
 
 class SkinnyCipher:
 
     # Sbox Constants
-    sbox = array('B',[12,6,9,0,1,10,2,11,3,8,5,13,4,14,7,15])
-    sbox_inv = array('B',[3,4,6,8,12,10,1,14,9,2,5,7,0,11,13,15])
+    sbox = array('B',[12, 6, 9, 0, 1, 10, 2, 11, 3, 8, 5, 13, 4, 14, 7, 15])
+    sbox_inv = array('B',[3, 4, 6, 8, 12, 10, 1, 14, 9, 2, 5, 7, 0, 11, 13, 15])
 
     # valid cipher configurations stored:
     # block_size:{key_size: number_rounds}
-    __valid_setups = {64: {96: 32, 128: 36, 192: 40},
+    __valid_setups = {64: {64: 32, 128: 36, 192: 40},
                       128: {128: 40, 256: 48, 384: 56}}
 
     __valid_modes = ['ECB', 'CTR', 'CBC', 'PCBC', 'CFB', 'OFB']
@@ -41,35 +49,42 @@ class SkinnyCipher:
             print('Please use one of the following block sizes:', [x for x in self.__valid_setups.keys()])
             raise
 
-        # Setup Number of Rounds, Z Sequence, and Key Size
+        # Setup Number of Rounds, and Key Size
         try:
-            self.rounds, self.zseq = self.possible_setups[key_size]
+            self.rounds = self.possible_setups[key_size]
             self.key_size = key_size
         except KeyError:
             print('Invalid key size for selected block size!!')
             print('Please use one of the following key sizes:', [x for x in self.possible_setups.keys()])
             raise
 
-        # Create Properly Sized bit mask for truncating addition and left shift outputs
-        self.mod_mask = (2 ** self.word_size) - 1
+        # Determine Cell Size
+        if self.block_size == 64:
+            self.s_val = 4
+        else: 
+            self.s_val = 8
+        
+        # Caclulate Tweakkey type based off ratio of key size and block size
+        self.tweak_size = self.key_size // self.block_size
+        
 
         # Parse the given iv and truncate it to the block length
-        try:
-            self.iv = init & ((2 ** self.block_size) - 1)
-            self.iv_upper = self.iv >> self.word_size
-            self.iv_lower = self.iv & self.mod_mask
-        except (ValueError, TypeError):
-            print('Invalid IV Value!')
-            print('Please Provide IV as int')
-            raise
+        # try:
+        #     self.iv = init & ((2 ** self.block_size) - 1)
+        #     self.iv_upper = self.iv >> self.word_size
+        #     self.iv_lower = self.iv & self.mod_mask
+        # except (ValueError, TypeError):
+        #     print('Invalid IV Value!')
+        #     print('Please Provide IV as int')
+        #     raise
 
         # Parse the given Counter and truncate it to the block length
-        try:
-            self.counter = counter & ((2 ** self.block_size) - 1)
-        except (ValueError, TypeError):
-            print('Invalid Counter Value!')
-            print('Please Provide Counter as int')
-            raise
+        # try:
+        #     self.counter = counter & ((2 ** self.block_size) - 1)
+        # except (ValueError, TypeError):
+        #     print('Invalid Counter Value!')
+        #     print('Please Provide Counter as int')
+        #     raise
 
         # Check Cipher Mode
         try:
@@ -88,24 +103,90 @@ class SkinnyCipher:
             print('Please Provide Key as int')
             raise
 
-        # Pre-compile key schedule
-        m = self.key_size // self.word_size
-        self.key_schedule = []
-
-        # Generate all round keys
-        self.key_schedule.append(k_reg.pop())
-        for x in range(self.rounds):
-
-            #Update Tweakkey
-            key_state = [array('B',[key_state[2][1],key_state[3][3],key_state[2][0],key_state[3][1]]),
-                    array('B',[key_state[2][2],key_state[3][2],key_state[3][0],key_state[2][3]]),
-                    key_state[0],
-                    key_state[1]]
         
-            print('Update Key:', key_state)
 
-            self.key_schedule.append(k_reg.pop())
+        # Initialize key state from input key value
+        row_size = self.s_val*4
+        cell_size = (2**self.s_val -1)
+        key_state = []
+        for z in range(self.tweak_size):
+            tweakkey = []
+            sub_key = self.key >> ((self.key_size - self.block_size) - (z * self.block_size))
+            for x in range(4):
+                shift_limit = self.block_size - row_size
+                shift_val = shift_limit - (row_size*x) 
+                word = (sub_key >> shift_val)  & (2**row_size -1)
+                line_array = array('B')
+                for y in range(4):
+                    line_array.append(word >> ((row_size - self.s_val) - (y*self.s_val)) & cell_size)
+                tweakkey.append(line_array)
+            key_state.append(tweakkey)
+            print('tweakkey',z,':',kst_to_str(tweakkey, self.s_val>>2))
+
+        # print('Key:', key_state)
+        # print(len(key_state))
+        # Pre-compile key schedule
+        
+        
+        
+
+        # Generate first round key from base input key
+        round_key_xor = [key_state[0][0], key_state[0][1]]
+        for twky in range(1, self.tweak_size):
+            round_key_xor[0] = array('B', map(xor,round_key_xor[0],key_state[twky][0]))
+            round_key_xor[1] =  array('B', map(xor,round_key_xor[1],key_state[twky][1]))
+
+        self.key_schedule = [round_key_xor]
+        
+        # Generate remaining round keys
+        for x in range(self.rounds):
+            print('Round:', x)
+            round_key_xor = [array('B',[0,0,0,0]), array('B',[0,0,0,0])]
+            for y, twky in enumerate(key_state):
+                print('Current Key', y, 'State:', kst_to_str(twky, self.s_val>>2))
+                # Perform Permutation Step
+                modifed_key_rows = [array('B',[twky[2][1],twky[3][3],twky[2][0],twky[3][1]]), 
+                                    array('B',[twky[2][2],twky[3][2],twky[3][0],twky[2][3]])]
+                
+                if y > 0:  # Perom LFSR step on higher tweakey components
+                    lfsr_rows = []
+                    for mod_row in modifed_key_rows:
+                        lfsr_row = array('B', [])
+                        for cell in mod_row:
+                            if self.s_val == 4:
+                                if y == 1:
+                                    lfsr_row.append(((cell << 1) ^ ((cell >> 3)^(cell >> 2) & 1)) & 0xF)
+                                else:
+                                    lfsr_row.append(((cell >> 1) ^ ((cell << 3)^cell & 0x8)) & 0xF)
+                            else:
+                                if y == 1:
+                                    lfsr_row.append(((cell << 1) ^ ((cell >> 7)^(cell >> 5) & 1)) & 0xFF)
+                                else:
+                                    lfsr_row.append(((cell >> 1) ^ ((cell << 7)^(cell << 1) & 0x80)) & 0xFF)
+                
+                        lfsr_rows.append(lfsr_row)
+                    modifed_key_rows = lfsr_rows       
+                
+                # Store updated round key data
+                round_key_xor[0] = array('B', map(xor,round_key_xor[0],modifed_key_rows[0]))
+                round_key_xor[1] =  array('B', map(xor,round_key_xor[1],modifed_key_rows[1]))
+
+                # Update key state 
+                key_state[y] = [modifed_key_rows[0],
+                                modifed_key_rows[1],
+                                twky[0],
+                                twky[1]]
             
+            for d,p in enumerate(key_state): 
+                frmt_str = '0' + str(self.s_val >> 2) + 'X'
+                key_string ='0X' + ''.join([''.join([format(x,frmt_str) for x in w]) for w in p])
+                # for w in p:
+                #     q = ''.join([hex(x)[2:] for x in w])
+                #     key_string += q
+                print('Update Key:', x, 'TWKY:', d, key_string)
+
+            self.key_schedule.append([round_key_xor[0], round_key_xor[1]])
+        
 
     def encrypt_round_64(self, state, round_key):
         """
@@ -160,27 +241,17 @@ class SkinnyCipher:
         internal_state = [mix_3, internal_state[0], mix_1, mix_2]
 
         print('After MixColumns:', internal_state)
-        
 
         return new_x, x
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 if __name__ == "__main__":
+
+    d = [array('B', [175, 76, 1, 31]), array('B', [4, 138, 182, 46]), array('B', [195, 176, 61, 201]), array('B', [115, 136, 64, 219])]
+    r = kst_to_str(d,2)
+    print('Hello',r)
+
+    p = SkinnyCipher(0x13ada9e39daf44cafc39cac5365d894cdab87554a200ca6a, 192, 64)    
+    exit(-1)
     # Sbox Constants
     sbox = array('B',[12,6,9,0,1,10,2,11,3,8,5,13,4,14,7,15])
     sbox_inv = array('B',[3,4,6,8,12,10,1,14,9,2,5,7,0,11,13,15])
