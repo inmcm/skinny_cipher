@@ -23,7 +23,6 @@ class SkinnyCipher:
     sbox4 = array('B',[12, 6, 9, 0, 1, 10, 2, 11, 3, 8, 5, 13, 4, 14, 7, 15])
     sbox4_inv = array('B',[3, 4, 6, 8, 12, 10, 1, 14, 9, 2, 5, 7, 0, 11, 13, 15])
 
-    
     sbox8 =  array('B',[0x65, 0x4c, 0x6a, 0x42, 0x4b, 0x63, 0x43, 0x6b, 0x55, 0x75, 0x5a, 0x7a,
                         0x53, 0x73, 0x5b, 0x7b, 0x35, 0x8c, 0x3a, 0x81, 0x89, 0x33, 0x80, 0x3b,
                         0x95, 0x25, 0x98, 0x2a, 0x90, 0x23, 0x99, 0x2b, 0xe5, 0xcc, 0xe8, 0xc1,
@@ -77,7 +76,6 @@ class SkinnyCipher:
                             0x34, 0x29, 0x12, 0x24, 0x08, 0x11, 0x22, 0x04, 0x09, 0x13,
                             0x26, 0x0c, 0x19, 0x32, 0x25, 0x0a, 0x15, 0x2a, 0x14, 0x28,
 		                    0x10, 0x20])
-
 
     # valid cipher configurations stored:
     # block_size:{key_size: number_rounds}
@@ -165,9 +163,7 @@ class SkinnyCipher:
             print('Invalid Key Value!')
             print('Please Provide Key as int')
             raise
-
         
-
         # Initialize key state from input key value
         self.row_size = self.s_val*4
         self.cell_size = (2**self.s_val -1)
@@ -184,11 +180,8 @@ class SkinnyCipher:
                     line_array.append(word >> ((self.row_size - self.s_val) - (y*self.s_val)) & self.cell_size)
                 tweakkey.append(line_array)
             key_state.append(tweakkey)
+        
         # Pre-compile key schedule
-        
-        
-        
-
         # Generate first round key from base input key
         round_key_xor = [key_state[0][0], key_state[0][1]]
         for twky in range(1, self.tweak_size):
@@ -234,16 +227,9 @@ class SkinnyCipher:
                                 modifed_key_rows[1],
                                 twky[0],
                                 twky[1]]
-            
-            # for d,p in enumerate(key_state): 
-            #     frmt_str = '0' + str(self.s_val >> 2) + 'X'
-            #     key_string ='0X' + ''.join([''.join([format(x,frmt_str) for x in w]) for w in p])
-            #     # for w in p:
-            #     #     q = ''.join([hex(x)[2:] for x in w])
-            #     #     key_string += q
-            #     print('Update Key:', x, 'TWKY:', d, key_string)
 
             self.key_schedule.append([round_key_xor[0], round_key_xor[1]])
+        
         
     def encrypt(self, plaintext):
         
@@ -349,59 +335,11 @@ class SkinnyCipher:
 
 if __name__ == "__main__":
 
-    test_vec_64_64 = [[0xb1b540d89ff9df70, 0x3e1c9d7d57844d8d, 0x1d29e6da4284a4ac],
-                      [0x788ae30f0614c84a, 0x570463ff8f79fb26, 0x2af2af3c7267ca8c],
-                      [0x67592647689e147e, 0xfe2e8afaf1eddd3e, 0xd1a0877fae18a816],
-                      [0xa19578e5f0daf102, 0xd7ae29d457bb6700, 0x85a1e1395c4ef8c5],
-                      [0x377cc345a669ecd8, 0x0323f685d848e0ca, 0xa1293461a78d49ab],
-                      [0x71a7f5b510018857, 0xa4ac2fb27f44bff0, 0xf8475e5450548fb6]]
+    p = SkinnyCipher(0x17401096d712b2adcc0143a91dddb11c) 
+    d = p.encrypt(0x5768de09fd1f69fd2a90de397270597a)
+    w = p.decrypt(0x1de2136fb373e0522cc2351306e9f62d)
+    print('Encrypt:', format(d, '#018X'))
+    print('Decrypt:', format(w, '#018X'))
+        
 
-
-    for test_vector in test_vec_64_64:
-        test_key = test_vector[0]    
-        test_plaintext = test_vector[1]
-        test_ciphertext = test_vector[2]
-
-        p = SkinnyCipher(test_key, 64, 64) 
-        d = p.encrypt(test_plaintext)
-        w = p.decrypt(test_ciphertext)
-        print('Encrypt:', format(d, '#018X'), format(test_ciphertext,'#018X'),end=' ')
-        if d == test_ciphertext:
-            print('Success!')
-        else:
-            print('Failure!')
-        print('Decrypt:', format(w, '#018X'), format(test_plaintext,'#018X'),end=' ')
-        if w == test_plaintext:
-            print('Success!')
-        else:
-            print('Failure!')   
-    exit(-1)
-    print('\a')
-
-    test_vec_64_128 = [[0xee7418c16edf6ab991b125b20d28a57a, 0x5d6f8605b4835657, 0xcd0f24faaf2d82ea],
-                       [0x8a7d9b6cb63efe8b4b71dfc6cb7dd463, 0x7f5905ace2badc8e, 0x61891a50ecce6391]]
-
-    for test_vector in test_vec_64_128:
-        key = test_vector[0]    
-        plaintext = test_vector[1]
-        test_ciphertext = test_vector[2]
-
-        p = SkinnyCipher(key, 128, 64) 
-        d = p.encrypt(plaintext)
-        print('Encrypt:', kst_to_str(d, p.s_val>>2), hex(test_ciphertext))
-
-
-    print('\a')
-
-    test_vec_128_128 = [[0x17401096d712b2adcc0143a91dddb11c, 0x5768de09fd1f69fd2a90de397270597a, 0x1de2136fb373e0522cc2351306e9f62d],
-                        [0xf3dc232e4fb8a0c996911ac83a470826, 0xd59881aa04a232e592732cce7acdbc61, 0xe0b9fca59c71d8bfb7efc0ecd6321cda]]
-
-    for test_vector in test_vec_128_128:
-        key = test_vector[0]    
-        plaintext = test_vector[1]
-        test_ciphertext = test_vector[2]
-
-        p = SkinnyCipher(key, 128, 128) 
-        d = p.encrypt(plaintext)
-        print('Encrypt:', kst_to_str(d, p.s_val>>2), hex(test_ciphertext))
     
