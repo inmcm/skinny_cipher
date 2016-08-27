@@ -6,13 +6,16 @@ from sys import exit
 
 __author__ = 'inmcm'
 
+
 def ary_to_str(byte_array, nibbles):  # Can print rows
     frmt_str = '0' + str(nibbles) + 'X'
     return ''.join([format(x,frmt_str) for x in byte_array])
 
+
 def kst_to_str(list_of_byte_arrays, nibbles):  # Can print whole key states
     frmt_str = '0' + str(nibbles) + 'X'
     return '0X' + ''.join([''.join([format(x,frmt_str) for x in w]) for w in list_of_byte_arrays])
+
 
 class SkinnyCipher:
 
@@ -82,6 +85,14 @@ class SkinnyCipher:
                       128: {128: 40, 256: 48, 384: 56}}
 
     __valid_modes = ['ECB', 'CTR', 'CBC', 'PCBC', 'CFB', 'OFB']
+    
+    def state_to_int(self, byte_array_state):
+        state_int = 0
+        for row in byte_array_state:                                                                                                                                                       
+            for cell in row:                                                                                                                                                
+                state_int <<= self.s_val                                                                                                                                                    
+                state_int += cell
+        return state_int
 
     def __init__(self, key, key_size=128, block_size=128, mode='ECB', init=0, counter=0):
         """
@@ -247,8 +258,6 @@ class SkinnyCipher:
             internal_state.append(line_array)
         
         for round_num in range(self.rounds): 
-
-
             # S-box Layer
             if self.s_val == 4:
                 sbox_state = [array('B',[self.sbox4[state_nib] for state_nib in state_row]) for state_row in internal_state]
@@ -256,11 +265,6 @@ class SkinnyCipher:
                 sbox_state = [array('B',[self.sbox8[state_byte] for state_byte in state_row]) for state_row in internal_state]
             
             internal_state = sbox_state
-            
-            # for x, state_word in enumerate(internal_state):
-            #     for y, state_byte in enumerate(state_word):
-            #         state_word[y] = sbox[state_byte]
-            #     internal_state[x] = state_word
 
             # AddRoundConstant
             round_constant = self.round_constants[round_num]
@@ -282,14 +286,65 @@ class SkinnyCipher:
                             array('B',[internal_state[3][1],internal_state[3][2],internal_state[3][3],internal_state[3][0]])]
 
             # MixColumns
-            mix_1 = array('B', [internal_state[1][x] ^ internal_state[2][x] for x in range(4)])
-            mix_2 = array('B', [internal_state[0][x] ^ internal_state[2][x] for x in range(4)])
-            mix_3 = array('B', [internal_state[3][x] ^ mix_2[x] for x in range(4)])
+            mix_1 = array('B', map(xor, internal_state[1], internal_state[2]))
+            mix_2 = array('B', map(xor, internal_state[0], internal_state[2]))
+            mix_3 = array('B', map(xor, internal_state[3], mix_2))
 
             internal_state = [mix_3, internal_state[0], mix_1, mix_2]                
 
-        ciphertext = internal_state
+        ciphertext = self.state_to_int(internal_state)
         return ciphertext
+
+    def decrypt(self, ciphertext):
+        
+        internal_state = []
+        for x in range(4):
+            shift_limit = self.block_size - self.row_size
+            shift_val = shift_limit - (self.row_size*x) 
+            word = (ciphertext >> shift_val)  & (2**self.row_size -1)
+            line_array = array('B')
+            for y in range(4):
+                line_array.append(word >> ((self.row_size - self.s_val) - (y*self.s_val)) & self.cell_size)
+            internal_state.append(line_array)
+
+        for round_num in range(self.rounds -1, -1, -1):
+        # round_num = 31
+            
+            # Inverse Mix Columns
+            mix_1 = array('B', map(xor, internal_state[0], internal_state[3]))
+            mix_2 = array('B', map(xor, internal_state[1], internal_state[3]))
+            mix_3 = array('B', map(xor, internal_state[2], mix_2))
+            internal_state = [internal_state[1],mix_3, mix_2, mix_1]
+
+            # Inverse Shift Rows
+            internal_state = [internal_state[0],
+                            array('B',[internal_state[1][1],internal_state[1][2],internal_state[1][3],internal_state[1][0]]),
+                            array('B',[internal_state[2][2],internal_state[2][3],internal_state[2][0],internal_state[2][1]]),   
+                            array('B',[internal_state[3][3],internal_state[3][0],internal_state[3][1],internal_state[3][2]])]
+
+            # Inverse AddTweakKey
+            internal_state[0] = array('B', map(xor,internal_state[0],self.key_schedule[round_num][0])) 
+            internal_state[1] = array('B', map(xor,internal_state[1],self.key_schedule[round_num][1]))
+
+            # Inverse AddRoundConstant
+            round_constant = self.round_constants[round_num]
+            c0 = round_constant & 0xF
+            c1 = round_constant >> 4
+            c2 = 0x2
+            internal_state[0][0] ^= c0
+            internal_state[1][0] ^= c1    
+            internal_state[2][0] ^= c2
+
+            # Inverse S-box Layer
+            if self.s_val == 4:
+                sbox_state = [array('B',[self.sbox4_inv[state_nib] for state_nib in state_row]) for state_row in internal_state]
+            else:
+                sbox_state = [array('B',[self.sbox8_inv[state_byte] for state_byte in state_row]) for state_row in internal_state]
+                
+            internal_state = sbox_state
+
+        plaintext = self.state_to_int(internal_state)
+        return plaintext    
 
 
 if __name__ == "__main__":
@@ -303,14 +358,24 @@ if __name__ == "__main__":
 
 
     for test_vector in test_vec_64_64:
-        key = test_vector[0]    
-        plaintext = test_vector[1]
+        test_key = test_vector[0]    
+        test_plaintext = test_vector[1]
         test_ciphertext = test_vector[2]
 
-        p = SkinnyCipher(key, 64, 64) 
-        d = p.encrypt(plaintext)
-        print('Encrypt:', kst_to_str(d, p.s_val>>2), hex(test_ciphertext))   
-    
+        p = SkinnyCipher(test_key, 64, 64) 
+        d = p.encrypt(test_plaintext)
+        w = p.decrypt(test_ciphertext)
+        print('Encrypt:', format(d, '#018X'), format(test_ciphertext,'#018X'),end=' ')
+        if d == test_ciphertext:
+            print('Success!')
+        else:
+            print('Failure!')
+        print('Decrypt:', format(w, '#018X'), format(test_plaintext,'#018X'),end=' ')
+        if w == test_plaintext:
+            print('Success!')
+        else:
+            print('Failure!')   
+    exit(-1)
     print('\a')
 
     test_vec_64_128 = [[0xee7418c16edf6ab991b125b20d28a57a, 0x5d6f8605b4835657, 0xcd0f24faaf2d82ea],
@@ -339,129 +404,4 @@ if __name__ == "__main__":
         p = SkinnyCipher(key, 128, 128) 
         d = p.encrypt(plaintext)
         print('Encrypt:', kst_to_str(d, p.s_val>>2), hex(test_ciphertext))
-    exit(-1)
     
-    
-    
-    
-    ########### OLD ###########################
-    
-    # Sbox Constants
-    sbox = array('B',[12,6,9,0,1,10,2,11,3,8,5,13,4,14,7,15])
-    sbox_inv = array('B',[3,4,6,8,12,10,1,14,9,2,5,7,0,11,13,15])
-
-    # Round Constants
-    round_constants = array('B',[0x01, 0x03, 0x07, 0x0F, 0x1F, 0x3E, 0x3D, 0x3B, 0x37, 0x2F, 
-                            0x1E, 0x3C, 0x39, 0x33, 0x27, 0x0E, 0x1D, 0x3A, 0x35, 0x2B,
-		                    0x16, 0x2C, 0x18, 0x30, 0x21, 0x02, 0x05, 0x0B, 0x17, 0x2E,
-                            0x1C, 0x38, 0x31, 0x23, 0x06, 0x0D, 0x1B, 0x36, 0x2D, 0x1A,
-                            0x34, 0x29, 0x12, 0x24, 0x08, 0x11, 0x22, 0x04, 0x09, 0x13,
-                            0x26, 0x0c, 0x19, 0x32, 0x25, 0x0a, 0x15, 0x2a, 0x14, 0x28,
-		                    0x10, 0x20])
-    # Test Vectors 
-    # Block Size = 64, Key Size = 64
-    test_vec_64_64 = [[0xb1b540d89ff9df70, 0x3e1c9d7d57844d8d, 0x1d29e6da4284a4ac],
-                      [0x788ae30f0614c84a, 0x570463ff8f79fb26, 0x2af2af3c7267ca8c],
-                      [0x67592647689e147e, 0xfe2e8afaf1eddd3e, 0xd1a0877fae18a816],
-                      [0xa19578e5f0daf102, 0xd7ae29d457bb6700, 0x85a1e1395c4ef8c5],
-                      [0x377cc345a669ecd8, 0x0323f685d848e0ca, 0xa1293461a78d49ab],
-                      [0x71a7f5b510018857, 0xa4ac2fb27f44bff0, 0xf8475e5450548fb6]]
-    # key = 0xb1b540d89ff9df70
-    # plaintext =  0x3e1c9d7d57844d8d
-    s = 4
-
-    for test_vector in test_vec_64_64:
-
-        key = test_vector[0]
-        plaintext = test_vector[1]
-        test_ciphertext = test_vector[2]
-
-        internal_state = []
-        for x in range(4):
-            word = (plaintext >> 48 - (16*x)) & 0xFFFF
-            line_array = array('B')
-            for y in range(4):
-                line_array.append(word >> (12 - (y*4)) & 0xF)
-            internal_state.append(line_array)
-
-        print('Plaintext:', internal_state)
-
-        key_state = []
-        for x in range(4):
-            word = (key >> 48 - (16*x)) & 0xFFFF
-            line_array = array('B')
-            for y in range(4):
-                line_array.append(word >> (12 - (y*4)) & 0xF)
-            key_state.append(line_array)
-
-        print('Key:', key_state)
-
-        number_of_rounds = 32
-
-        for round in range(number_of_rounds):
-            print('Running Round:', round)
-            # Do 4 Bit S-Box
-            for x, state_word in enumerate(internal_state):
-                for y, state_byte in enumerate(state_word):
-                    state_word[y] = sbox[state_byte]
-                internal_state[x] = state_word
-
-            print('After S Box:', internal_state)
-
-            # AddRoundConstant
-            round_constant = round_constants[round]
-            print('Round Constant:', round_constant)
-            c0 = round_constant & 0xF
-            c1 = (round_constant >> 4) & 0x3
-            c2 = 0x2
-            internal_state[0][0] ^= c0
-            internal_state[1][0] ^= c1    
-            internal_state[2][0] ^= c2
-
-            print('After AddRoundConstant:', internal_state)
-
-            # AddTweakKey
-            internal_state[0] = array('B', [internal_state[0][x] ^ key_state[0][x] for x in range(4)]) 
-            internal_state[1] = array('B', [internal_state[1][x] ^ key_state[1][x] for x in range(4)])
-            print('After Key XOR:', internal_state)
-
-            #Update Tweakkey
-            key_state = [array('B',[key_state[2][1],key_state[3][3],key_state[2][0],key_state[3][1]]),
-                        array('B',[key_state[2][2],key_state[3][2],key_state[3][0],key_state[2][3]]),
-                        key_state[0],
-                        key_state[1]]
-            
-            print('Update Key:', key_state)
-
-            # Shift Rows
-            internal_state = [internal_state[0],
-                            array('B',[internal_state[1][3],internal_state[1][0],internal_state[1][1],internal_state[1][2]]),
-                            array('B',[internal_state[2][2],internal_state[2][3],internal_state[2][0],internal_state[2][1]]),   
-                            array('B',[internal_state[3][1],internal_state[3][2],internal_state[3][3],internal_state[3][0]])]
-            
-            print('After ShiftRows:', internal_state)
-
-            # MixColumns
-            mix_1 = array('B', [internal_state[1][x] ^ internal_state[2][x] for x in range(4)])
-            mix_2 = array('B', [internal_state[0][x] ^ internal_state[2][x] for x in range(4)])
-            mix_3 = array('B', [internal_state[3][x] ^ mix_2[x] for x in range(4)])
-
-            internal_state = [mix_3, internal_state[0], mix_1, mix_2]
-
-            print('After MixColumns:', internal_state)
-
-            print('')
-        
-        ciphertext = 0
-        for ct_word in internal_state:
-            for ct_byte in ct_word:
-                ciphertext <<= s
-                ciphertext += ct_byte
-                
-        print('Final Ciphertext:', hex(ciphertext))
-        if ciphertext == test_ciphertext:
-            print('Success!')
-        else:
-            print('Failure')
-            exit(1)
-    print('DONE!!!!')
