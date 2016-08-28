@@ -6,17 +6,6 @@ from sys import exit
 
 __author__ = 'inmcm'
 
-
-def ary_to_str(byte_array, nibbles):  # Can print rows
-    frmt_str = '0' + str(nibbles) + 'X'
-    return ''.join([format(x,frmt_str) for x in byte_array])
-
-
-def kst_to_str(list_of_byte_arrays, nibbles):  # Can print whole key states
-    frmt_str = '0' + str(nibbles) + 'X'
-    return '0X' + ''.join([''.join([format(x,frmt_str) for x in w]) for w in list_of_byte_arrays])
-
-
 class SkinnyCipher:
 
     # Sbox Constants
@@ -84,6 +73,18 @@ class SkinnyCipher:
 
     __valid_modes = ['ECB', 'CTR', 'CBC', 'PCBC', 'CFB', 'OFB']
     
+    def int_to_state(self, valid_int):
+        byte_state = []
+        for x in range(4):
+            shift_limit = self.block_size - self.row_size
+            shift_val = shift_limit - (self.row_size*x) 
+            word = (valid_int >> shift_val)  & (2**self.row_size -1)
+            line_array = array('B')
+            for y in range(4):
+                line_array.append(word >> ((self.row_size - self.s_val) - (y*self.s_val)) & self.cell_size)
+            byte_state.append(line_array)
+        return byte_state
+
     def state_to_int(self, byte_array_state):
         state_int = 0
         for row in byte_array_state:                                                                                                                                                       
@@ -128,24 +129,27 @@ class SkinnyCipher:
         
         # Caclulate Tweakkey type based off ratio of key size and block size
         self.tweak_size = self.key_size // self.block_size
+
+        self.row_size = self.s_val*4
+        self.cell_size = (2**self.s_val -1)
         
         # Parse the given iv and truncate it to the block length
-        # try:
-        #     self.iv = init & ((2 ** self.block_size) - 1)
-        #     self.iv_upper = self.iv >> self.word_size
-        #     self.iv_lower = self.iv & self.mod_mask
-        # except (ValueError, TypeError):
-        #     print('Invalid IV Value!')
-        #     print('Please Provide IV as int')
-        #     raise
+        try:
+            iv_int = init & ((2 ** self.block_size) - 1)
+            self.iv = self.int_to_state(iv_int)
+        except (ValueError, TypeError):
+            print('Invalid IV Value!')
+            print('Please Provide IV as int')
+            raise
 
         # Parse the given Counter and truncate it to the block length
-        # try:
-        #     self.counter = counter & ((2 ** self.block_size) - 1)
-        # except (ValueError, TypeError):
-        #     print('Invalid Counter Value!')
-        #     print('Please Provide Counter as int')
-        #     raise
+        try:
+            counter_int = counter & ((2 ** self.block_size) - 1)
+            self.counter = self.int_to_state(counter_int)
+        except (ValueError, TypeError):
+            print('Invalid Counter Value!')
+            print('Please Provide Counter as int')
+            raise
 
         # Check Cipher Mode
         try:
@@ -165,20 +169,10 @@ class SkinnyCipher:
             raise
         
         # Initialize key state from input key value
-        self.row_size = self.s_val*4
-        self.cell_size = (2**self.s_val -1)
         key_state = []
         for z in range(self.tweak_size):
-            tweakkey = []
             sub_key = self.key >> ((self.key_size - self.block_size) - (z * self.block_size))
-            for x in range(4):
-                shift_limit = self.block_size - self.row_size
-                shift_val = shift_limit - (self.row_size*x) 
-                word = (sub_key >> shift_val)  & (2**self.row_size -1)
-                line_array = array('B')
-                for y in range(4):
-                    line_array.append(word >> ((self.row_size - self.s_val) - (y*self.s_val)) & self.cell_size)
-                tweakkey.append(line_array)
+            tweakkey = self.int_to_state(sub_key)
             key_state.append(tweakkey)
         
         # Pre-compile key schedule
@@ -230,18 +224,16 @@ class SkinnyCipher:
 
             self.key_schedule.append([round_key_xor[0], round_key_xor[1]])
         
-        
+
     def encrypt(self, plaintext):
         
-        internal_state = []
-        for x in range(4):
-            shift_limit = self.block_size - self.row_size
-            shift_val = shift_limit - (self.row_size*x) 
-            word = (plaintext >> shift_val)  & (2**self.row_size -1)
-            line_array = array('B')
-            for y in range(4):
-                line_array.append(word >> ((self.row_size - self.s_val) - (y*self.s_val)) & self.cell_size)
-            internal_state.append(line_array)
+        try:
+            pt_int = plaintext & ((2 ** self.block_size) - 1)
+            internal_state = self.int_to_state(pt_int)
+        except (ValueError, TypeError):
+            print('Invalid Plaintext Value!')
+            print('Please Provide Plaintext as int')
+            raise
         
         for round_num in range(self.rounds): 
             # S-box Layer
@@ -283,18 +275,15 @@ class SkinnyCipher:
 
     def decrypt(self, ciphertext):
         
-        internal_state = []
-        for x in range(4):
-            shift_limit = self.block_size - self.row_size
-            shift_val = shift_limit - (self.row_size*x) 
-            word = (ciphertext >> shift_val)  & (2**self.row_size -1)
-            line_array = array('B')
-            for y in range(4):
-                line_array.append(word >> ((self.row_size - self.s_val) - (y*self.s_val)) & self.cell_size)
-            internal_state.append(line_array)
+        try:
+            ct_int = ciphertext & ((2 ** self.block_size) - 1)
+            internal_state = self.int_to_state(ct_int)
+        except (ValueError, TypeError):
+            print('Invalid Ciphertext Value!')
+            print('Please Provide Ciphertext as int')
+            raise
 
         for round_num in range(self.rounds -1, -1, -1):
-        # round_num = 31
             
             # Inverse Mix Columns
             mix_1 = array('B', map(xor, internal_state[0], internal_state[3]))
@@ -332,7 +321,6 @@ class SkinnyCipher:
         plaintext = self.state_to_int(internal_state)
         return plaintext    
 
-
 if __name__ == "__main__":
 
     p = SkinnyCipher(0x17401096d712b2adcc0143a91dddb11c) 
@@ -340,6 +328,3 @@ if __name__ == "__main__":
     w = p.decrypt(0x1de2136fb373e0522cc2351306e9f62d)
     print('Encrypt:', format(d, '#018X'))
     print('Decrypt:', format(w, '#018X'))
-        
-
-    
