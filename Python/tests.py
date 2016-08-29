@@ -130,4 +130,56 @@ class TestOfficialTestVectors:
             d = p.encrypt(test_plaintext)
             w = p.decrypt(test_ciphertext)
             assert d == test_ciphertext
-            assert w == test_plaintext                
+            assert w == test_plaintext
+
+class TestCipherInitialization:
+    not_ints = [6.22, 'hello', bytearray(b'stuffandbytes'), bytearray([12, 34, 0xAA, 00, 0x00, 34]), '0x1234567']
+
+    def test_bad_plaintext_skinny(self):
+        for bad_plain in self.not_ints:
+            with pytest.raises(TypeError):
+                t = SkinnyCipher(0)
+                t.encrypt(bad_plain)
+
+    def test_bad_ciphertext_skinny(self):
+        for bad_crypt in self.not_ints:
+            with pytest.raises(TypeError):
+                t = SkinnyCipher(0)
+                t.encrypt(bad_crypt)
+
+
+    def test_bad_keys_skinny(self):
+        for bad_key in self.not_ints:
+            with pytest.raises(TypeError):
+                SkinnyCipher(bad_key)
+
+    def test_bad_counters_skinny(self):
+        for bad_counter in self.not_ints:
+            with pytest.raises(TypeError):
+                SkinnyCipher(0, counter=bad_counter)
+
+    def test_bad_ivs_skinny(self):
+        for bad_iv in self.not_ints:
+            with pytest.raises(TypeError):
+                SkinnyCipher(0, init=bad_iv)
+
+    not_block_modes = [7.1231, 'ERT', 11]
+
+    def test_bad_modes_skinny(self):
+        for bad_mode in self.not_block_modes:
+            with pytest.raises(ValueError):
+                SkinnyCipher(0, mode=bad_mode)
+
+    not_block_sizes = [10, 'steve', 11.8]
+
+    def test_bad_blocksizes_skinny(self):
+        for bad_bsize in self.not_block_sizes:
+            with pytest.raises(KeyError):
+                SkinnyCipher(0, block_size=bad_bsize)
+
+    not_key_sizes = [100000, 'eve', 11.8, 127]
+
+    def test_bad_keysize_skinny(self):
+        for bad_ksize in self.not_key_sizes:
+            with pytest.raises(KeyError):
+                SkinnyCipher(0, key_size=bad_ksize)
