@@ -1,8 +1,6 @@
 from __future__ import print_function
-from collections import deque
 from array import array
-from operator import xor, add
-from sys import exit
+from operator import xor
 
 __author__ = 'inmcm'
 
