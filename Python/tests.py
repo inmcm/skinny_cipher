@@ -183,3 +183,165 @@ class TestCipherInitialization:
         for bad_ksize in self.not_key_sizes:
             with pytest.raises(KeyError):
                 SkinnyCipher(0, key_size=bad_ksize)
+
+
+class TestCipherModesSkinny:
+
+    key = 0x1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100
+    plaintxt = 0x65736f6874206e49202e72656e6f6f70
+    iv = 0x123456789ABCDEF00FEDCBA987654321
+    counter = 0x1
+    block_size = 128
+    key_size = 256
+    chain_limit = 100
+
+
+    def test_ctr_mode_equivalent(self):
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CTR', init=self.iv, counter=self.counter)
+        ctr_out = c.encrypt(self.plaintxt)
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+        ecb_out = c.encrypt(self.iv + self.counter)
+        ctr_equivalent = ecb_out ^ self.plaintxt
+        assert ctr_out == ctr_equivalent
+
+    def test_ctr_mode_single_cycle(self):
+
+        self.counter = 0x01
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CTR', init=self.iv, counter=self.counter)
+        ctr_out = c.encrypt(self.plaintxt)
+
+        self.counter = 0x01
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CTR', init=self.iv, counter=self.counter)
+        output_plaintext = c.decrypt(ctr_out)
+
+        assert output_plaintext == self.plaintxt
+
+    def test_ctr_mode_chain(self):
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CTR', init=self.iv, counter=self.counter)
+
+        ctr_out = 0
+        for x in range(self.chain_limit):
+            ctr_out = c.encrypt(self.plaintxt)
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+
+        ctr_equivalent = 0
+        for x in range(self.chain_limit):
+            ecb_out = c.encrypt(self.iv + self.counter)
+            self.counter += 1
+            ctr_equivalent = ecb_out ^ self.plaintxt
+
+        assert ctr_out == ctr_equivalent
+
+    def test_cbc_mode_single(self):
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CBC', init=self.iv)
+        cbc_out = c.encrypt(self.plaintxt)
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+        cbc_equivalent = c.encrypt(self.iv ^ self.plaintxt)
+        assert cbc_out == cbc_equivalent
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CBC', init=self.iv)
+        cbc_decrypt_out = c.decrypt(cbc_out)
+        assert cbc_decrypt_out == self.plaintxt
+
+    def test_cbc_mode_chain(self):
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CBC', init=self.iv)
+
+        cbc_out = 0
+        for x in range(self.chain_limit):
+            cbc_out = c.encrypt(self.plaintxt)
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+
+        cbc_equivalent = self.iv
+        for x in range(self.chain_limit):
+            cbc_input = self.plaintxt ^ cbc_equivalent
+            cbc_equivalent = c.encrypt(cbc_input)
+
+        assert cbc_out == cbc_equivalent
+
+    def test_pcbc_mode_single(self):
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'PCBC', init=self.iv)
+        pcbc_out = c.encrypt(self.plaintxt)
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+        pcbc_equivalent = c.encrypt(self.iv ^ self.plaintxt)
+        assert pcbc_out == pcbc_equivalent
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'PCBC', init=self.iv)
+        pcbc_decrypt_out = c.decrypt(pcbc_out)
+        assert pcbc_decrypt_out == self.plaintxt
+
+    def test_pcbc_mode_chain(self):
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'PCBC', init=self.iv)
+
+        pcbc_out = 0
+        for x in range(self.chain_limit):
+            pcbc_out = c.encrypt(self.plaintxt)
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+
+        pcbc_equivalent = 0
+        for x in range(self.chain_limit):
+            pcbc_input = self.plaintxt ^ self.iv
+            pcbc_equivalent = c.encrypt(pcbc_input)
+            self.iv = pcbc_equivalent ^ self.plaintxt
+
+        assert pcbc_out == pcbc_equivalent
+
+    def test_cfb_mode_equivalent(self):
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CFB', init=self.iv)
+        cfb_encrypt = c.encrypt(self.plaintxt)
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CFB', init=self.iv)
+        cfb_decrypt = c.decrypt(cfb_encrypt)
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+        ecb_out = c.encrypt(self.iv)
+        cfb_equivalent_encrypt = ecb_out ^ self.plaintxt
+        cfb_equivalent_decrypt = ecb_out ^ cfb_equivalent_encrypt
+
+        assert cfb_encrypt == cfb_equivalent_encrypt
+        assert cfb_decrypt == cfb_equivalent_decrypt
+
+    def test_cfb_mode_chain(self):
+        plaintxts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CFB', init=self.iv)
+        ciphertexts = [c.encrypt(x) for x in plaintxts]
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'CFB', init=self.iv)
+        decryptexts = [c.decrypt(x) for x in ciphertexts]
+
+        assert plaintxts == decryptexts
+
+    def test_ofb_mode_equivalent(self):
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'OFB', init=self.iv)
+        ofb_encrypt = c.encrypt(self.plaintxt)
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'OFB', init=self.iv)
+        ofb_decrypt = c.decrypt(ofb_encrypt)
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'ECB')
+        ecb_out = c.encrypt(self.iv)
+        ofb_equivalent_encrypt = ecb_out ^ self.plaintxt
+        ofb_equivalent_decrypt = ecb_out ^ ofb_equivalent_encrypt
+
+        assert ofb_encrypt == ofb_equivalent_encrypt
+        assert ofb_decrypt == ofb_equivalent_decrypt
+
+    def test_ofb_mode_chain(self):
+        plaintxts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'OFB', init=self.iv)
+        ciphertexts = [c.encrypt(x) for x in plaintxts]
+        c = SkinnyCipher(self.key, self.key_size, self.block_size, 'OFB', init=self.iv)
+        decryptexts = [c.decrypt(x) for x in ciphertexts]
+
+        assert plaintxts == decryptexts

@@ -1,7 +1,7 @@
 from __future__ import print_function
 from collections import deque
 from array import array
-from operator import xor
+from operator import xor, add
 from sys import exit
 
 __author__ = 'inmcm'
@@ -132,10 +132,11 @@ class SkinnyCipher:
 
         self.row_size = self.s_val*4
         self.cell_size = (2**self.s_val -1)
+        self.block_mask = ((2 ** self.block_size) - 1)
         
         # Parse the given iv and truncate it to the block length
         try:
-            iv_int = init & ((2 ** self.block_size) - 1)
+            iv_int = init & self.block_mask 
             self.iv = self.int_to_state(iv_int)
         except (ValueError, TypeError):
             print('Invalid IV Value!')
@@ -144,8 +145,7 @@ class SkinnyCipher:
 
         # Parse the given Counter and truncate it to the block length
         try:
-            counter_int = counter & ((2 ** self.block_size) - 1)
-            self.counter = self.int_to_state(counter_int)
+            self.counter = (iv_int + counter) & self.block_mask
         except (ValueError, TypeError):
             print('Invalid Counter Value!')
             print('Please Provide Counter as int')
@@ -228,13 +228,59 @@ class SkinnyCipher:
     def encrypt(self, plaintext):
         
         try:
-            pt_int = plaintext & ((2 ** self.block_size) - 1)
-            internal_state = self.int_to_state(pt_int)
+            pt_int = plaintext & self.block_mask
+            plaintext_state = self.int_to_state(pt_int)
         except (ValueError, TypeError):
             print('Invalid Plaintext Value!')
             print('Please Provide Plaintext as int')
             raise
         
+        # Prepare Based On Mode
+        if self.mode == 'ECB':
+            internal_state = plaintext_state
+            internal_state = self.encrypt_function(internal_state)
+            ciphertext = self.state_to_int(internal_state)
+            return ciphertext
+        
+        elif self.mode == 'CTR':
+            internal_state = self.int_to_state(self.counter)
+            self.counter += 1
+            internal_state = self.encrypt_function(internal_state)
+            internal_state = [array('B',map(xor, plaintext_state[x], internal_state[x])) for x in range(4)]
+            ciphertext = self.state_to_int(internal_state)
+            return ciphertext
+
+        elif self.mode == 'CBC':
+            internal_state = [array('B',map(xor, plaintext_state[x], self.iv[x])) for x in range(4)]
+            internal_state = self.encrypt_function(internal_state)
+            self.iv = internal_state
+            ciphertext = self.state_to_int(internal_state)
+            return ciphertext
+
+        elif self.mode == 'PCBC':
+            internal_state = [array('B',map(xor, plaintext_state[x], self.iv[x])) for x in range(4)]
+            internal_state = self.encrypt_function(internal_state)
+            self.iv = [array('B',map(xor, plaintext_state[x], internal_state[x])) for x in range(4)]
+            ciphertext = self.state_to_int(internal_state)
+            return ciphertext
+
+        elif self.mode == 'CFB':
+            internal_state = self.encrypt_function(self.iv)
+            internal_state = [array('B',map(xor, plaintext_state[x], internal_state[x])) for x in range(4)]
+            self.iv = internal_state
+            ciphertext = self.state_to_int(internal_state)
+            return ciphertext
+
+        elif self.mode == 'OFB':
+            internal_state = self.encrypt_function(self.iv)
+            self.iv = internal_state
+            internal_state = [array('B',map(xor, plaintext_state[x], internal_state[x])) for x in range(4)]
+            ciphertext = self.state_to_int(internal_state)
+            return ciphertext
+
+    def encrypt_function(self, internal_state):    
+        
+        # Run Encryption Steps For Appropriate Number of Rounds
         for round_num in range(self.rounds): 
             # S-box Layer
             if self.s_val == 4:
@@ -268,20 +314,63 @@ class SkinnyCipher:
             mix_2 = array('B', map(xor, internal_state[0], internal_state[2]))
             mix_3 = array('B', map(xor, internal_state[3], mix_2))
 
-            internal_state = [mix_3, internal_state[0], mix_1, mix_2]                
-
-        ciphertext = self.state_to_int(internal_state)
-        return ciphertext
+            internal_state = [mix_3, internal_state[0], mix_1, mix_2]
+        return internal_state                
 
     def decrypt(self, ciphertext):
         
         try:
-            ct_int = ciphertext & ((2 ** self.block_size) - 1)
-            internal_state = self.int_to_state(ct_int)
+            ct_int = ciphertext & self.block_mask
+            ciphertext_state = self.int_to_state(ct_int)
         except (ValueError, TypeError):
             print('Invalid Ciphertext Value!')
             print('Please Provide Ciphertext as int')
             raise
+
+        # Prepare Based On Mode
+        if self.mode == 'ECB':
+            internal_state = ciphertext_state
+            internal_state = self.decrypt_function(internal_state)
+            plaintext = self.state_to_int(internal_state)
+            return plaintext
+        
+        elif self.mode == 'CTR':
+            internal_state = self.int_to_state(self.counter)
+            self.counter += 1
+            internal_state = self.encrypt_function(internal_state)
+            internal_state = [array('B',map(xor, ciphertext_state[x], internal_state[x])) for x in range(4)]
+            plaintext = self.state_to_int(internal_state)
+            return plaintext
+
+        elif self.mode == 'CBC':
+            internal_state = self.decrypt_function(ciphertext_state)
+            internal_state = [array('B',map(xor, internal_state[x], self.iv[x])) for x in range(4)]
+            self.iv = ciphertext_state
+            plaintext = self.state_to_int(internal_state)
+            return plaintext
+
+        elif self.mode == 'PCBC':
+            internal_state = self.decrypt_function(ciphertext_state)
+            internal_state = [array('B',map(xor, internal_state[x], self.iv[x])) for x in range(4)]
+            self.iv = [array('B',map(xor, internal_state[x], ciphertext_state[x])) for x in range(4)]
+            plaintext = self.state_to_int(internal_state)
+            return plaintext
+
+        elif self.mode == 'CFB':
+            internal_state = self.encrypt_function(self.iv)
+            internal_state = [array('B',map(xor, ciphertext_state[x], internal_state[x])) for x in range(4)]
+            self.iv = ciphertext_state
+            plaintext = self.state_to_int(internal_state)
+            return plaintext
+
+        elif self.mode == 'OFB':
+            internal_state = self.encrypt_function(self.iv)
+            self.iv = internal_state
+            internal_state = [array('B',map(xor, ciphertext_state[x], internal_state[x])) for x in range(4)]
+            plaintext = self.state_to_int(internal_state)
+            return plaintext
+
+    def decrypt_function(self, internal_state):
 
         for round_num in range(self.rounds -1, -1, -1):
             
@@ -317,9 +406,7 @@ class SkinnyCipher:
                 sbox_state = [array('B',[self.sbox8_inv[state_byte] for state_byte in state_row]) for state_row in internal_state]
                 
             internal_state = sbox_state
-
-        plaintext = self.state_to_int(internal_state)
-        return plaintext    
+        return internal_state   
 
 if __name__ == "__main__":
 
